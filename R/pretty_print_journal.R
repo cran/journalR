@@ -14,46 +14,65 @@
 #'
 #' `central` could be mean, median, point_estimate
 #'
-#' Transform c(central = 0.994, lower = 0.984, upper = 0.998) to "99.4%
-#' (98.4–99.8)"
+#' Transform c(central = 0.994, lower = 0.984, upper = 0.998) to "99.4\%
+#' (98.4--99.8)"
 #'
-#' Accounts for negative values, and UIs that cross zero.  Checks if
-#' central, lower, upper values are in the correct order.
+#' Accounts for negative values, and UIs that cross zero.  Checks if central,
+#' lower, upper values are in the correct order.
 #'
 #' @param central [num] central, point_estimate value vector
 #' @param lower [num] lower bound vector
 #' @param upper [num] upper bound vector
-#' @param d_type [chr c(prop, pp, count)] data type - proportion, percentage
+#' @param metric [chr c(prop, pp, count, rate)] metric - proportion,
+#'   percentage point, count, or rate
+#' @param rate_unit [chr: default NULL] rate unit label (required when metric = 'rate')
+#' @param mag [chr: default NULL] magnitude override - see set_magnitude()
+#'   - For props/pp: "as-is" (no scaling, use values as provided)
+#'   - For counts: "t" (thousand), "m" (million), "b" (billion)
+#'   - For rates: "per10", "per100", "per1k", ..., "per10b"
+#'   - Examples: "deaths", "cases", "events", "births"
 #' @param style_name [chr: default 'nature'] style name - controls rounding and
-#'  formatting.
+#'   formatting.
+#'
 #' @return [chr] formatted string vector
 #' @export
 #' @family styled_formats
-#'
 #' @examples
 #' format_journal_clu(
 #'  central = c(0.994, -0.994)
 #'  , lower = c(0.984, -0.998)
 #'  , upper = c(0.998, -0.984)
-#'  , d_type = "prop"
+#'  , metric = "prop"
+#' )
+#'
+#' # Rate formatting with rate_unit
+#' format_journal_clu(
+#'   central   = 0.0000123,
+#'   lower     = 0.0000098,
+#'   upper     = 0.0000152,
+#'   metric    = "rate",
+#'   rate_unit = "deaths"
 #' )
 format_journal_clu <- function(
       central
       , lower
       , upper
-      , d_type
+      , metric
+      , rate_unit  = NULL
+      , mag        = NULL
       , style_name = "nature"
 ) {
 
-   d_type <- assert_data_type(d_type)
+   metric <- assert_metric(metric)
+   assert_rate_unit(metric, rate_unit)
 
-   style            <- get_style(style_name)
-   neg_mark_mean    <- style[["neg_mark_mean"]]
-   UI_only          <- style[["UI_only"]]
-   UI_text          <- style[["UI_text"]]
-   assert_clu_order <- style[["assert_clu_order"]]
-   label_thousands  <- style[["label_thousands"]]
-   round_5_up       <- style[["round_5_up"]]
+   style                  <- get_style(style_name)
+   neg_mark_mean          <- style[["neg_mark_mean"]]
+   UI_only                <- style[["UI_only"]]
+   UI_text                <- style[["UI_text"]]
+   assert_clu_order       <- style[["assert_clu_order"]]
+   count_label_thousands  <- style[["count_label_thousands"]]
+   round_5_up             <- style[["round_5_up"]]
 
    checkmate::assert_numeric(central, min.len = 1)
    checkmate::assert_numeric(lower)
@@ -72,6 +91,15 @@ format_journal_clu <- function(
       , upper = upper
    )
 
+   n <- nrow(clu)
+
+   # === REMOVED: All state management ===
+   # - init_df_mag_state(n)
+   # - on.exit(flush_df_mag_state(), add = TRUE)
+   # - Thread safety code (data.table::setDTthreads)
+   # - Initial set_magnitude() call
+   # - set_df_mag_state(df_mag)
+
    if(assert_clu_order == TRUE){
       assert_clu_relationship(
          central = clu$central
@@ -81,17 +109,6 @@ format_journal_clu <- function(
    }
 
    triplets <- t(clu) # transpose for easier processing
-
-   # Magnitude of triplets use raw central value
-   # lower and upper inherit central value magnitude scaling
-   df_mag  <- set_magnitude(
-      # x                 = clu$central
-      x                 = triplets["central", ]
-      , mag             = NULL
-      , label_thousands = label_thousands
-      , verbose         = FALSE
-   )
-   # mag_label_vec <- df_mag$mag_label
 
    # Capture numeric info before character conversion
    # Does UI cross zero? Decide which UI separator to use.
@@ -124,78 +141,75 @@ format_journal_clu <- function(
       , assert_clu_order = assert_clu_order
    )
 
-   # Counts edge case - magnitude boundaries
-   #
-   # Before we do any formatting, we need to re-check the scale of the central
-   # value as it would round given the user's count method. This must be done
-   # here at the formatting level because it affects the final formatting label.
-   # This creates an undesireable repeated logic with `fround_count()` &
-   # `format_journal_clu()` but I see no current way around it, as there's no
-   # good mechanism to pass re-calculated, vectorized magnitude information back
-   # up the stack.
-   #
-   # Must maintain matching 'rounding' logic here and within `fround_count()`
-   #
-   # - fround_count(c(999999, 888888, 2222222)) produces:
-   #   - c("1,000,000", "800,000", "2,000,000")
-   # - but we want:
-   #   - c("1.00 million", "0.80 million", "2.00 million")
-   if(d_type == "count") {
-      central_vals <- clu[["central"]]
-      central_fmts <- NULL
-      if (round_5_up) {
-         central_vals <- central_vals + 1e-9
-      }
-      central_sc <- central_vals / df_mag$denom
-
-      central_fmts <- switch_strict(
-         style[["count_method"]]
-         , "sigfig"  = signif(central_sc, style[["count_digits_sigfig"]])
-         , "decimal" = round(central_sc, digits = style[["count_nsmall"]])
-         , "int"     = round(central_sc, digits = 0)
-      )
-
-      #  re-calc magnitude at original scale, post rounding
-      df_mag <- set_magnitude(
-         x                 = central_fmts * df_mag$denom
-         , mag             = NULL
-         , label_thousands = label_thousands
-         , verbose         = FALSE
-         )
-   }
-
-   # Where the magic happens
-   # - Negative signs are styled internally
-   triplets_fmt <- lapply(seq_len(ncol(triplets_neg_processed)), function(idx){
-      triplet_fmt <- fround_clu_triplet(
+   # === NEW: Format triplets and accumulate df_mag ===
+   # Each call returns list(formatted = chr[3], df_mag_row = df[1,])
+   results_list <- lapply(seq_len(ncol(triplets_neg_processed)), function(idx){
+      result <- fround_clu_triplet(
          clu          = triplets_neg_processed[, idx]
-         , d_type     = d_type
+         , metric     = metric
          , style_name = style_name
-         , df_mag     = df_mag[idx, ]
+         , mag        = mag
       )
-      # These should be retained, but let's use belt and suspenders
-      names(triplet_fmt) <- c("central", "lower", "upper")
-      triplet_fmt
+
+      # Validate schema
+      assert_fround_return_schema(
+         result,
+         context = sprintf("fround_clu_triplet (triplet %d)", idx)
+      )
+
+      # Ensure names are present
+      names(result$formatted) <- c("central", "lower", "upper")
+
+      return(result)
    })
 
-   d_type_label <- get_data_type_labels(d_type)
+   # Extract formatted values
+   triplets_fmt <- lapply(results_list, function(r) r$formatted)
+
+   # Accumulate df_mag rows
+   df_mag <- do.call(rbind, lapply(results_list, function(r) r$df_mag_row))
+   rownames(df_mag) <- NULL  # Clean up row names
+
+   # === END NEW ===
+
+   metric_label <- get_metric_labels(metric)
+
+   is_rate_type <- (metric == "rate")
 
    str_vec <- unlist(lapply(seq_along(triplets_fmt), function(i){
-      .cen          <- triplets_fmt[[i]]['central']
-      .upp          <- triplets_fmt[[i]]['upper']
-      .low          <- triplets_fmt[[i]]['lower']
-      .mean_neg_txt <- neg_str_mean_vec[i]
-      .mag_label    <- df_mag$mag_label[i]
-      .low_upp_sep  <- sep_vec[i]
+      cen          <- triplets_fmt[[i]]['central']
+      upp          <- triplets_fmt[[i]]['upper']
+      low          <- triplets_fmt[[i]]['lower']
+      mean_neg_txt <- neg_str_mean_vec[i]
+      mag_label    <- df_mag$mag_label[i]
+      low_upp_sep  <- sep_vec[i]
 
-      # Building blocks for final string
-      str <- glue::glue("{.mean_neg_txt}{.cen}{d_type_label} {.mag_label}({UI_text}{.low}{.low_upp_sep}{.upp})")
-
-      if (UI_only) {
-         str <- glue::glue("{UI_text}{.low}{.low_upp_sep}{.upp}{.mag_label}")
+      # Define rate-specific components
+      if (is_rate_type) {
+         rate_unit_fmt  <- sprintf(" %s", rate_unit)  # " deaths" or " cases"
+         rate_mag_label <- sprintf(" %s", mag_label)  # " per 100,000"
+         mag_label      <- ""                         # empty for rates
+         metric_label   <- ""                         # empty for rates
+      } else {
+         rate_unit_fmt  <- ""                         # empty for non-rates
+         rate_mag_label <- ""                         # empty for non-rates
+         mag_label      <- mag_label                  # "million " for counts
+         metric_label   <- metric_label               # "%" for props
       }
 
-      return(str)
+      # Single glue template handles all metrics
+      str <- glue::glue(
+         "{mean_neg_txt}{cen}{rate_unit_fmt}{metric_label} {mag_label}({UI_text}{low}{low_upp_sep}{upp}){rate_mag_label}"
+      )
+
+      if (UI_only) {
+         rate_mag_label <- trimws(rate_mag_label) # context dependent
+         str <- glue::glue(
+            "{UI_text}{low}{low_upp_sep}{upp}{rate_unit_fmt} {mag_label}{rate_mag_label}"
+         )
+      }
+
+      return(trimws(str))
 
    }))
 
@@ -205,19 +219,27 @@ format_journal_clu <- function(
 
 #' Return a table with formatted central, lower, upper
 #'
-#' Assumes a single data-type (d_type) for the whole table (e.g. 'prop', 'pp',
+#' Assumes a single data-type (metric) for the whole table (e.g. 'prop', 'pp',
 #' 'count')
 #'
 #' @param df [data.frame, data.table]
-#' @param d_type [chr c('prop', 'pp', or 'count')] a single data type
+#' @param metric [chr c('prop', 'pp', 'count', 'rate')] a single metric
+#' @param rate_unit [chr: default NULL] rate unit label (required when metric = 'rate')
+#'   - Examples: "deaths", "cases", "events", "births"
 #' @param central_var [chr: default 'mean'] name of central tendency variable
 #' @param lower_var [chr: default 'lower'] name of lower bound variable
 #' @param upper_var [chr: default 'upper'] name of upper bound variable
-#' @param remove_clu_columns [lgl: default TRUE] remove central, lower, upper variables after
-#'  formatting?
+#' @param remove_clu_columns [lgl: default TRUE] remove central, lower, upper
+#'   variables after formatting?
 #' @param style_name [chr: default 'nature'] style name - controls rounding and
 #'   formatting.
 #' @param new_var [chr: default 'clu_fmt'] name of new formatted column
+#' @param mag [chr: default NULL] magnitude override - see set_magnitude()
+#'   - For props/pp: "as-is" (no scaling, use values as provided)
+#'   - For counts: "t" (thousand), "m" (million), "b" (billion)
+#'   - For rates: "per10", "per100", "per1k", ..., "per10b"
+#'   - Examples: "deaths", "cases", "events", "births"
+#'
 #' @returns [data.frame] data.frame, data.table with new 'clu_fmt' column
 #' @export
 #' @family styled_formats
@@ -225,31 +247,34 @@ format_journal_clu <- function(
 #' @examples
 #' df <- data.frame(
 #'  location_id = c(1, 2, 3)
-#'  , mean = c(0.1234, 0, -0.3456)
-#'  , lower = c(0.1134, -0.2245, -0.4445)
-#'  , upper = c(0.1334, 0.2445, 0.3556)
+#'  , mean      = c(0.1234, 0, -0.3456)
+#'  , lower     = c(0.1134, -0.2245, -0.4445)
+#'  , upper     = c(0.1334, 0.2445, 0.3556)
 #' )
-#' format_journal_df(df, d_type = "prop")
+#' format_journal_df(df, metric = "prop")
 #'
-#' DF <- data.frame(
-#'  location_id = c(1, 2, 3)
-#'  , mean = c(0.1234, 0, -0.3456)
-#'  , lower = c(0.1134, -0.2245, -0.4445)
-#'  , upper = c(0.1334, 0.2445, 0.3556)
+#' # Rate formatting example
+#' rate_df <- data.frame(
+#'   location = c("Global", "USA"),
+#'   mean     = c(0.0000123, 0.0000456),
+#'   lower    = c(0.0000098, 0.0000401),
+#'   upper    = c(0.0000152, 0.0000512)
 #' )
-#' format_journal_df(DF, d_type = "prop")
+#' format_journal_df(rate_df, metric = "rate", rate_unit = "deaths")
 format_journal_df <- function(
       df
-      , d_type
+      , metric
       , new_var            = "clu_fmt"
       , style_name         = "nature"
       , central_var        = "mean"
       , lower_var          = "lower"
       , upper_var          = "upper"
       , remove_clu_columns = TRUE
+      , rate_unit          = NULL
+      , mag                = NULL
 ){
 
-   d_type <- assert_data_type(d_type)
+   metric <- assert_metric(metric)
 
    checkmate::assert_string(central_var)
    checkmate::assert_string(lower_var)
@@ -265,8 +290,10 @@ format_journal_df <- function(
          central      = df[[central_var]]
          , lower      = df[[lower_var]]
          , upper      = df[[upper_var]]
-         , d_type     = d_type
+         , metric     = metric
          , style_name = style_name
+         , rate_unit  = rate_unit
+         , mag        = mag
       )
    )
 
@@ -275,21 +302,23 @@ format_journal_df <- function(
    return(df[]) # helps data.table printing
 }
 
-#' Format multiple data.frame 'mean_*' columns for presentation (by data type).
+#' Format multiple data.frame 'mean_*' columns for presentation (by metric).
 #'
-#' Format one or more 'mean_' columns by magnitude, data_type, and style.
-#'
-#' BEWARE: Does not have sophisticated count-type data handling like
-#' `format_journal_clu()`.  This is a simple formatter for multiple mean columns.
-#' Use with caution.
+#' Format one or more 'mean_' columns by magnitude, metric, and style.
 #'
 #' @param df [data.table] input data.table with one or more 'mean_' columns
-#' @param d_type [chr c('prop', 'pp', or 'count')] a single data type
-#' @param central_var [chr: default 'mean'] prefix of mean variable names to
-#'   format.  Implemented as e.g. "^mean[_]*" to capture 'mean', 'mean_1990',
+#' @param metric [chr c('prop', 'pp', 'count', 'rate')] a single metric
+#' @param rate_unit [chr: default NULL] unit label for rates (e.g., "deaths", "cases").
+#'   Required when metric = "rate", ignored otherwise.
+#' @param var_prefix [chr: default 'mean'] prefix of mean variable names to
+#'   format.  Implemented as e.g. "^mean[_]+" to capture 'mean', 'mean_1990',
 #'   'mean_2000', etc.
+#' @param mag [chr: default NULL] magnitude override - see set_magnitude()
+#'   - For props/pp: "as-is" (no scaling, use values as provided)
+#'   - For counts: "t" (thousand), "m" (million), "b" (billion)
+#'   - For rates: "per10", "per100", "per1k", ..., "per10b"
 #' @param style_name [chr: default 'nature'] style name - controls rounding and
-#'  formatting.
+#'   formatting.
 #'
 #' @returns [data.table] copy of input data.table with formatted mean column(s)
 #' @export
@@ -301,57 +330,76 @@ format_journal_df <- function(
 #'   , mean_1990 = c(100, 1e6, 1e9)
 #'   , mean_2000 = c(200, 2e6, 2e-1)
 #'  )
-#' format_means_df(df, d_type = "count")
-format_means_df <- function(
+#' format_metric_cols(df, metric = "count")
+format_metric_cols <- function(
       df
-      , d_type
-      , central_var = "mean"
+      , metric
+      , var_prefix = "mean"
+      , rate_unit   = NULL
+      , mag         = NULL
       , style_name  = "nature"
 ){
    checkmate::assert_data_frame(df)
-   assert_data_type(d_type)
-   checkmate::assert_string(central_var)
+   assert_metric(metric)
+   checkmate::assert_string(var_prefix)
+   assert_rate_unit(metric, rate_unit)
 
-   style <- get_style(style_name)
+   df_name <- deparse(substitute(df))
 
-   digits <- get_style_item_by_data_type(
-      style_name   = style_name
-      , style_item = "digits"
-      , d_type     = d_type
-   )
-   scalar <- get_style_item_by_data_type(
-      style_name   = style_name
-      , style_item = "scalar"
-      , d_type     = d_type
-   )
-   n_small <- get_style_item_by_data_type(
-      style_name   = style_name
-      , style_item = "n_small"
-      , d_type     = d_type
-   )
-
-   label <- get_data_type_labels(d_type)
-
-   mean_varnames <- grep(
-      pattern = sprintf("^%s[_]+", central_var)
+   varnames <- grep(
+      pattern = sprintf("^%s[_]+", var_prefix)
       , x     = colnames(df)
       , value = TRUE
    )
+   if(length(varnames) == 0){
+      warning(sprintf(
+         "%s: No columns found with prefix '%s_'. Do column names have this prefix _and_ underscores?"
+         , df_name, var_prefix
+      ))
+   }
 
-   for (varname in mean_varnames){
-      df <- add_column(
-         x        = df
-         , varname = varname
-         , vec     = paste0(
-            fmt_magnitude(
-               x                 = df[[varname]] * scalar
-               , mag             = NULL
-               , label_thousands = style[["label_thousands"]]
-               , digits          = digits
-               , nsmall          = n_small
-            )
-            , label
+   for (varname in varnames){
+      # Format each value individually to get proper per-value magnitude and Lancet handling
+      ret_list <- lapply(df[[varname]], function(x_i) {
+         result <- switch(
+            metric
+            , "prop"  = fround_props(clu = x_i, style_name = style_name, mag = mag)
+            , "pp"    = fround_props(clu = x_i, style_name = style_name, mag = mag)
+            , "count" = fround_count_rate(clu = x_i, style_name = style_name, metric = "count", mag = mag)
+            , "rate"  = fround_count_rate(clu = x_i, style_name = style_name, metric = "rate", mag = mag)
          )
+      })
+
+      is_rate_type  <- (metric == "rate")
+
+      fmt_vals      <- unlist(lapply(ret_list, function(r) r$formatted[1]))
+      mag_labels    <- unlist(lapply(ret_list, function(r) r$df_mag_row$mag_label))
+      metric_label  <- get_metric_labels(metric)
+
+      if (is_rate_type) {
+         rate_unit_fmt <- sprintf(" %s", rate_unit)
+      } else{
+         rate_unit_fmt <- ""
+      }
+
+      # context-dependent space padding
+      mag_spacers <- unlist(lapply(mag_labels, function(lbl) {
+         if (nchar(lbl) & !startsWith(lbl, "\\s")) {
+            " "
+         } else {
+            ""
+         }
+      }))
+
+      formatted_vals <- glue::glue(
+         "{fmt_vals}{rate_unit_fmt}{mag_spacers}{mag_labels}{metric_label}"
+      ) |> trimws()
+
+
+      df <- add_column(
+         x           = df
+         , varname   = varname
+         , vec       = formatted_vals
          , overwrite = TRUE
       )
    }
@@ -367,7 +415,14 @@ format_means_df <- function(
 #' @param central [num] central, point_estimate value vector
 #' @param lower [num] lower bound vector
 #' @param upper [num] upper bound vector
-#' @param d_type [chr c(prop, pp, count)] data type - proportion, percentage
+#' @param metric [chr c(prop, pp, count, rate)] metric - proportion,
+#'   percentage point, count, or rate
+#' @param rate_unit [chr: default NULL] rate unit label (required when metric = 'rate')
+#' @param mag [chr: default NULL] magnitude override - see set_magnitude()
+#'   - For props/pp: "as-is" (no scaling, use values as provided)
+#'   - For counts: "t" (thousand), "m" (million), "b" (billion)
+#'   - For rates: "per10", "per100", "per1k", ..., "per10b"
+#'   - Examples: "deaths", "cases", "events", "births"
 #'
 #' @returns [chr] formatted string vector
 #' @export
@@ -378,37 +433,57 @@ format_means_df <- function(
 #'    central  = c(0.994, -0.994)
 #'    , lower  = c(0.984, -0.998)
 #'    , upper  = c(0.998, -0.984)
-#'    , d_type = "prop"
+#'    , metric = "prop"
+#' )
+#'
+#' # Rate example with Lancet formatting
+#' format_lancet_clu(
+#'   central   = 0.0000123,
+#'   lower     = 0.0000098,
+#'   upper     = 0.0000152,
+#'   metric    = "rate",
+#'   rate_unit = "deaths"
 #' )
 format_lancet_clu <- function(
       central
       , lower
       , upper
-      , d_type
+      , metric
+      , rate_unit = NULL
+      , mag       = NULL
 ) {
    format_journal_clu(
       central      = central
       , lower      = lower
       , upper      = upper
-      , d_type     = d_type
+      , metric     = metric
+      , rate_unit  = rate_unit
+      , mag        = mag
       , style_name = "lancet"
    )
 }
 
 #' Return a table with formatted central, lower, upper for Lancet journal
 #'
-#' Assumes a single data-type (d_type) for the whole table (e.g. 'prop', 'pp',
+#' Assumes a single data-type (metric) for the whole table (e.g. 'prop', 'pp',
 #' 'count')
 #'
 #' @param df [data.table] with central, lower, upper columns
-#' @param d_type [chr c(prop', 'pp', 'count')] data type - proportion, percentage
-#'   point or count
+#' @param metric [chr c('prop', 'pp', 'count', 'rate')] metric - proportion,
+#'   percentage point, count, or rate
 #' @param central_var [chr: default 'mean'] name of central tendency e.g.
 #'   'point_estimate'
 #' @param lower_var [chr: default 'lower']
 #' @param upper_var [chr: default 'upper']
 #' @param new_var [chr: default 'clu_fmt'] name of new formatted column
-#' @param remove_clu_columns [lgl: default TRUE] remove central, lower, upper columns?
+#' @param remove_clu_columns [lgl: default TRUE] remove central, lower, upper
+#'   columns after formatting?
+#' @param rate_unit [chr: default NULL] rate unit label (required when metric = 'rate')
+#' @param mag [chr: default NULL] magnitude override - see set_magnitude()
+#'   - For props/pp: "as-is" (no scaling, use values as provided)
+#'   - For counts: "t" (thousand), "m" (million), "b" (billion)
+#'   - For rates: "per10", "per100", "per1k", ..., "per10b"
+#'   - Examples: "deaths", "cases", "events", "births"
 #'
 #' @returns [data.frame, data.table] with mean_95_UI_formatted column, and
 #'   central, lower, upper columns removed (if specified)
@@ -424,25 +499,29 @@ format_lancet_clu <- function(
 #'    , lower         = 50.7e6
 #'    , upper         = 60.7e6
 #' )
-#' format_lancet_df(df = df, d_type = "count", central_var = 'mean')
+#' format_lancet_df(df = df, metric = "count", central_var = 'mean')
 format_lancet_df <- function(
       df
-      , d_type
+      , metric
       , new_var            = "clu_fmt"
       , central_var        = "mean"
       , lower_var          = "lower"
       , upper_var          = "upper"
       , remove_clu_columns = TRUE
+      , rate_unit          = NULL
+      , mag                = NULL
 ){
    format_journal_df(
       df                   = df
-      , d_type             = d_type
-      , style_name         = "lancet"
+      , metric             = metric
+      , rate_unit          = rate_unit
+      , new_var            = new_var
       , central_var        = central_var
       , lower_var          = lower_var
       , upper_var          = upper_var
-      , new_var            = new_var
       , remove_clu_columns = remove_clu_columns
+      , mag                = mag
+      , style_name         = "lancet"
    )
 }
 
@@ -455,7 +534,14 @@ format_lancet_df <- function(
 #' @param central [num] central, point_estimate value vector
 #' @param lower [num] lower bound vector
 #' @param upper [num] upper bound vector
-#' @param d_type [chr c(prop, pp, count)] data type - proportion, percentage
+#' @param metric [chr c(prop, pp, count, rate)] metric - proportion,
+#'   percentage point, count, or rate
+#' @param rate_unit [chr: default NULL] rate unit label (required when metric = 'rate')
+#' @param mag [chr: default NULL] magnitude override - see set_magnitude()
+#'   - For props/pp: "as-is" (no scaling, use values as provided)
+#'   - For counts: "t" (thousand), "m" (million), "b" (billion)
+#'   - For rates: "per10", "per100", "per1k", ..., "per10b"
+#'   - Examples: "deaths", "cases", "events", "births"
 #'
 #' @returns [chr] formatted string vector
 #' @export
@@ -466,19 +552,32 @@ format_lancet_df <- function(
 #'    central  = c(0.994, -0.994)
 #'    , lower  = c(0.984, -0.998)
 #'    , upper  = c(0.998, -0.984)
-#'    , d_type = "prop"
+#'    , metric = "prop"
+#' )
+#'
+#' # Rate example with Nature formatting
+#' format_nature_clu(
+#'   central   = 0.0000123,
+#'   lower     = 0.0000098,
+#'   upper     = 0.0000152,
+#'   metric    = "rate",
+#'   rate_unit = "cases"
 #' )
 format_nature_clu <- function(
       central
       , lower
       , upper
-      , d_type
+      , metric
+      , rate_unit = NULL
+      , mag       = NULL
 ) {
    format_journal_clu(
       central      = central
       , lower      = lower
       , upper      = upper
-      , d_type     = d_type
+      , metric     = metric
+      , rate_unit  = rate_unit
+      , mag        = mag
       , style_name = "nature"
    )
 }
@@ -486,13 +585,20 @@ format_nature_clu <- function(
 #' Return a table with formatted central, lower, upper for Nature journal
 #'
 #' @param df [data.table]
-#' @param d_type [chr c('prop', 'pp', or 'count')] a single data type
+#' @param metric [chr c('prop', 'pp', 'count', 'rate')] a single metric
 #' @param new_var [chr: default 'clu_fmt'] name of new formatted column
 #' @param central_var [chr: default 'mean'] name of central tendency variable
 #' @param lower_var [chr: default 'lower'] name of lower bound variable
 #' @param upper_var [chr: default 'upper'] name of upper bound variable
-#' @param remove_clu_columns [lgl: default TRUE] remove central, lower, upper variables
-#'   after
+#' @param remove_clu_columns [lgl: default TRUE] remove central, lower, upper
+#'   columns after formatting?
+#' @param mag [chr: default NULL] magnitude override - see set_magnitude()
+#'   - For props/pp: "as-is" (no scaling, use values as provided)
+#'   - For counts: "t" (thousand), "m" (million), "b" (billion)
+#'   - For rates: "per10", "per100", "per1k", ..., "per10b"
+#'   - Examples: "deaths", "cases", "events", "births"
+#' @param rate_unit [chr: default NULL] rate unit label (required when metric = 'rate')
+#'
 #' @returns [data.table] copy of input data.table with new 'clu_fmt' column
 #' @export
 #' @family styled_formats
@@ -506,24 +612,28 @@ format_nature_clu <- function(
 #'    , lower         = 50.7e6
 #'    , upper         = 60.7e6
 #' )
-#' format_nature_df(df = df, d_type = "count", central_var = 'mean')
+#' format_nature_df(df = df, metric = "count", central_var = 'mean')
 format_nature_df <- function(
       df
-      , d_type
+      , metric
       , new_var            = "clu_fmt"
       , central_var        = "mean"
       , lower_var          = "lower"
       , upper_var          = "upper"
       , remove_clu_columns = TRUE
+      , rate_unit          = NULL
+      , mag                = NULL
 ){
    format_journal_df(
       df                   = df
-      , d_type             = d_type
-      , style_name         = "nature"
+      , metric             = metric
+      , rate_unit          = rate_unit
+      , new_var            = new_var
       , central_var        = central_var
       , lower_var          = lower_var
       , upper_var          = upper_var
-      , new_var            = new_var
       , remove_clu_columns = remove_clu_columns
+      , mag                = mag
+      , style_name         = "nature"
    )
 }

@@ -4,7 +4,15 @@
 \alias{format_journal_clu}
 \title{Format central, lower, upper value triplets for journal presentation}
 \usage{
-format_journal_clu(central, lower, upper, d_type, style_name = "nature")
+format_journal_clu(
+  central,
+  lower,
+  upper,
+  metric,
+  rate_unit = NULL,
+  mag = NULL,
+  style_name = "nature"
+)
 }
 \arguments{
 \item{central}{[num] central, point_estimate value vector}
@@ -13,7 +21,16 @@ format_journal_clu(central, lower, upper, d_type, style_name = "nature")
 
 \item{upper}{[num] upper bound vector}
 
-\item{d_type}{[chr c(prop, pp, count)] data type - proportion, percentage}
+\item{metric}{[chr c(prop, pp, count, rate)] metric - proportion,
+percentage point, count, or rate}
+
+\item{rate_unit}{[chr: default NULL] rate unit label (required when metric = 'rate')}
+
+\item{mag}{[chr: default NULL] magnitude override - see set_magnitude()
+- For props/pp: "as-is" (no scaling, use values as provided)
+- For counts: "t" (thousand), "m" (million), "b" (billion)
+- For rates: "per10", "per100", "per1k", ..., "per10b"
+- Examples: "deaths", "cases", "events", "births"}
 
 \item{style_name}{[chr: default 'nature'] style name - controls rounding and
 formatting.}
@@ -31,18 +48,27 @@ Takes three vectors as main arguments for data.table-friendly vectorization.
 
 `central` could be mean, median, point_estimate
 
-Transform c(central = 0.994, lower = 0.984, upper = 0.998) to "99.4%
-(98.4–99.8)"
+Transform c(central = 0.994, lower = 0.984, upper = 0.998) to "99.4\%
+(98.4--99.8)"
 
-Accounts for negative values, and UIs that cross zero.  Checks if
-central, lower, upper values are in the correct order.
+Accounts for negative values, and UIs that cross zero.  Checks if central,
+lower, upper values are in the correct order.
 }
 \examples{
 format_journal_clu(
  central = c(0.994, -0.994)
  , lower = c(0.984, -0.998)
  , upper = c(0.998, -0.984)
- , d_type = "prop"
+ , metric = "prop"
+)
+
+# Rate formatting with rate_unit
+format_journal_clu(
+  central   = 0.0000123,
+  lower     = 0.0000098,
+  upper     = 0.0000152,
+  metric    = "rate",
+  rate_unit = "deaths"
 )
 }
 \seealso{
@@ -50,7 +76,7 @@ Other styled_formats:
 \code{\link{format_journal_df}()},
 \code{\link{format_lancet_clu}()},
 \code{\link{format_lancet_df}()},
-\code{\link{format_means_df}()},
+\code{\link{format_metric_cols}()},
 \code{\link{format_nature_clu}()},
 \code{\link{format_nature_df}()},
 \code{\link{fround_clu_triplet}()},

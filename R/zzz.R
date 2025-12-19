@@ -31,7 +31,7 @@
 #'
 #' @returns [env] the package's dictionary environment
 #'
-#'@keywords internal
+#' @keywords internal
 get_dict_formats <- function() {
    .dict_formats
 }
@@ -86,10 +86,6 @@ get_dict_format <- function(dict_name) {
 #'
 set_dict_format <- function(dict_name, dict_entry) {
    checkmate::assert_string(dict_name)
-   # done within schema validation, keep this one as general as possible
-   # checkmate::assert_list(dict_entry, names = "named")
-   # unlock_some_bindings(objs = dict_name, env = .dict_formats)
    .dict_formats[[dict_name]] <- dict_entry
-   # lock_some_bindings(dict_name, .dict_formats)
 }
 

@@ -6,15 +6,23 @@
 \usage{
 fmt_magnitude(
   x,
+  metric,
+  rate_unit = NULL,
   digits = 1,
   nsmall = 1,
   decimal.mark = ".",
+  big.mark = ",",
   mag = NULL,
-  label_thousands = FALSE
+  count_label_thousands = FALSE
 )
 }
 \arguments{
 \item{x}{[num] numeric vector}
+
+\item{metric}{[chr `c("prop", "pp", "count", "rate")`]}
+
+\item{rate_unit}{[chr: default NULL] unit label for rates (e.g., "deaths", "cases").
+Required when metric = "rate", ignored otherwise.}
 
 \item{digits}{[int: default 1L] passed to `round()`}
 
@@ -22,10 +30,14 @@ fmt_magnitude(
 
 \item{decimal.mark}{[chr: default "."] decimal mark passed to `format()`}
 
-\item{mag}{[chr c("b", "m", "t")] magnitude (billion, million,
-thousand) passed to set_magnitude()}
+\item{big.mark}{[chr: default ","] thousands separator passed to `format()`}
 
-\item{label_thousands}{[lgl: default FALSE] allow thousands magnitude?  Not
+\item{mag}{[chr: default NULL] magnitude override - see set_magnitude()
+- For props/pp: "as-is" (no scaling, use values as provided)
+- For counts: "t" (thousand), "m" (million), "b" (billion)
+- For rates: "per10", "per100", "per1k", ..., "per10b"}
+
+\item{count_label_thousands}{[lgl: default FALSE] allow thousands magnitude?  Not
 Lancet-valid. Passed to `set_magnitude()`}
 }
 \value{
@@ -36,24 +48,29 @@ Format a numeric vector into a string with specified magnitude (billion,
 million, thousand).
 }
 \details{
-Unaware of schema, just a hard-coded git-er-done function.
+Unaware of styles, just a hard-coded git-er-done function.
 
 Caution - thousands magnitude is not Lancet compliant.
 }
 \examples{
-fmt_magnitude(123456789)
+fmt_magnitude(123456789, metric = "count")
+fmt_magnitude(0.0000123, metric = "rate", rate_unit = "deaths")
 }
 \seealso{
 Other vector_formats: 
+\code{\link{add_epsilon}()},
 \code{\link{format_oxford_comma}()},
 \code{\link{fround}()},
-\code{\link{fround_count}()},
-\code{\link{fround_dtype}()},
-\code{\link{fround_dtype_lancet}()},
+\code{\link{fround_count_rate}()},
+\code{\link{fround_metric}()},
+\code{\link{fround_metric_lancet}()},
 \code{\link{fround_props}()}
 
 Other magnitudes: 
-\code{\link{set_magnitude}()}
+\code{\link{set_magnitude}()},
+\code{\link{set_magnitude_count}()},
+\code{\link{set_magnitude_prop}()},
+\code{\link{set_magnitude_rate}()}
 }
 \concept{magnitudes}
 \concept{vector_formats}

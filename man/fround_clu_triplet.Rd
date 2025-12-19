@@ -2,34 +2,30 @@
 % Please edit documentation in R/format_vectors.R
 \name{fround_clu_triplet}
 \alias{fround_clu_triplet}
-\title{Format and round central/lower/upper value sets by magnitude without units.}
+\title{Format and round a single central/lower/upper value set by magnitude without units}
 \usage{
-fround_clu_triplet(
-  clu,
-  d_type,
-  style_name = "nature",
-  df_mag = set_magnitude(clu[1])
-)
+fround_clu_triplet(clu, metric, style_name = "nature", mag = NULL)
 }
 \arguments{
-\item{clu}{[num] a numeric triplet of three values in central/lower/upper
-order.}
+\item{clu}{[num] a numeric triplet of three values in central/lower/upper order}
 
-\item{d_type}{[chr c('prop', 'pp', or 'count')] data type - proportion,
-percentage point or count}
+\item{metric}{[chr c('prop', 'pp', 'count', or 'rate')] metric type - proportion,
+percentage point, count, or rate}
 
-\item{style_name}{[chr: default 'nature'] style name - controls rounding and
-formatting.}
+\item{style_name}{[chr: default 'nature'] style name - controls rounding and formatting}
 
-\item{df_mag}{[named list] output from `set_magnitude()` - must be based on
-central value of a central/lower/upper set - central and all UI values
-inherit the same scale as the central tendency.}
+\item{mag}{[chr: default NULL] magnitude override - see set_magnitude()
+- For props/pp: "as-is" (no scaling, use values as provided)
+- For counts: "t" (thousand), "m" (million), "b" (billion)
+- For rates: "per10", "per100", "per1k", ..., "per10b"}
 }
 \value{
-[chr] formatted string (vectorized)
+[list] with elements:
+  - formatted: chr[3] - formatted central, lower, upper values
+  - df_mag_row: data.frame[1,] - magnitude info (mag, mag_label, denom)
 }
 \description{
-`central` could be mean/median/point_estimate. `d_type` is required (count
+`central` could be mean/median/point_estimate. `metric` is required (count
 data requires nuanced logic), but labels are not returned.
 }
 \details{
@@ -42,7 +38,7 @@ Other styled_formats:
 \code{\link{format_journal_df}()},
 \code{\link{format_lancet_clu}()},
 \code{\link{format_lancet_df}()},
-\code{\link{format_means_df}()},
+\code{\link{format_metric_cols}()},
 \code{\link{format_nature_clu}()},
 \code{\link{format_nature_df}()},
 \code{\link{new_style}()}

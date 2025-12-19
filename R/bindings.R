@@ -6,6 +6,7 @@
 #' @param env [environment] the environment to lock the bindings in
 #'
 #' @returns [chr] invisible vector of input objects, to allow easier un-locking
+#' @keywords internal
 #'
 #' @family bindings
 #' @keywords internal
